@@ -14,8 +14,8 @@ version = "1.0.0"
 
 [dependencies]
 gleam_stdlib = "~> 0.34 or ~> 1.0"
-based = { path = "../based" }
 sqlight = "~> 0.9"
+based = ">= 1.0.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"
