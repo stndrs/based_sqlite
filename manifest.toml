@@ -10,7 +10,7 @@ packages = [
 ]
 
 [requirements]
-based = { version = ">= 1.0.0 and < 2.0.0"}
+based = { version = ">= 1.0.0 and < 2.0.0" }
 gleam_stdlib = { version = "~> 0.34 or ~> 1.0" }
 gleeunit = { version = "~> 1.0" }
 sqlight = { version = "~> 0.9" }
