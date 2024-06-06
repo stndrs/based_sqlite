@@ -3,6 +3,10 @@
 [![Package Version](https://img.shields.io/hexpm/v/based_sqlite)](https://hex.pm/packages/based_sqlite)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/based_sqlite/)
 
+## WIP
+
+This package should be used with [`based`](https://github.com/stndrs/based)
+
 ```sh
 gleam add based_sqlite
 ```
