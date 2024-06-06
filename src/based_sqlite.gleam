@@ -9,8 +9,8 @@ import sqlight.{type Connection}
 
 pub fn with_connection(
   db_name: String,
-  callback: fn(DB(a, Connection)) -> Result(Returned(a), Nil),
-) -> Result(Returned(a), Nil) {
+  callback: fn(DB(a, Connection)) -> t,
+) -> t {
   use conn <- sqlight.with_connection(db_name)
 
   DB(conn: conn, execute: execute) |> callback
