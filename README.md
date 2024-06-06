@@ -11,7 +11,7 @@ This package should be used with [`based`](https://github.com/stndrs/based)
 gleam add based_sqlite
 ```
 ```gleam
-import based.{Query, exec}
+import based
 import based_sqlite
 import gleam/option.{None}
 
@@ -20,7 +20,9 @@ const sql = "DELETE FROM users WHERE id=$1;"
 pub fn main() {
   use db <- based.register(based_sqlite.with_connection, ":memory:")
 
-  Query(sql: sql, args: [based.int(1)], decoder: None) |> exec(db)
+  based.new_query(sql)
+  |> based.with_args([based.int(1)])
+  |> based.exec(db)
 }
 ```
 

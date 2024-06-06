@@ -1,6 +1,5 @@
-import based.{Query}
+import based
 import based_sqlite
-import gleam/option.{None}
 import gleeunit
 import gleeunit/should
 
@@ -12,7 +11,8 @@ pub fn with_connection_test() {
   let result = {
     use db <- based_sqlite.with_connection(":memory:")
 
-    Query(sql: "SELECT 1", args: [], decoder: None) |> db.execute(db.conn)
+    based.new_query("SELECT 1")
+    |> based.exec(db)
   }
 
   result |> should.be_ok
