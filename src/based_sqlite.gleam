@@ -1,41 +1,36 @@
 import based.{
-  type DB, type Query, type Returned, type Value, DB, Query, Returned,
+  type BasedAdapter, type BasedError, type Query, type Value, BasedAdapter,
+  BasedError, Query,
 }
-import gleam/dynamic
+import gleam/dynamic.{type Dynamic}
 import gleam/list
-import gleam/option.{Some}
 import gleam/result
-import sqlight.{type Connection}
+import sqlight.{type Connection, SqlightError}
 
-pub fn with_connection(
-  db_name: String,
-  callback: fn(DB(a, Connection)) -> t,
-) -> t {
-  use conn <- sqlight.with_connection(db_name)
-
-  DB(conn: conn, execute: execute) |> callback
+/// Returns a `BasedAdapter` that can be passed into `based.register`
+pub fn adapter(db_name: String) -> BasedAdapter(String, Connection, t) {
+  BasedAdapter(
+    with_connection: with_connection,
+    conf: db_name,
+    service: execute,
+  )
 }
 
-fn execute(query: Query(a), conn: Connection) -> Result(Returned(a), Nil) {
-  let Query(sql, args, maybe_decoder) = query
+fn with_connection(db_name: String, callback: fn(Connection) -> t) -> t {
+  sqlight.with_connection(db_name, callback)
+}
+
+fn execute(query: Query, conn: Connection) -> Result(List(Dynamic), BasedError) {
+  let Query(sql, args) = query
 
   let values = to_sqlite_values(args)
+  sqlight.query(sql, on: conn, with: values, expecting: dynamic.dynamic)
+  |> result.map_error(fn(err) {
+    let SqlightError(code, message, _offset) = err
+    let code = dynamic.from(code) |> dynamic.classify
 
-  let execution = case maybe_decoder {
-    Some(decoder) -> {
-      sqlight.query(sql, on: conn, with: values, expecting: decoder)
-      |> result.map(fn(rows) {
-        let count = list.length(rows)
-        Returned(count, rows)
-      })
-    }
-    _ -> {
-      sqlight.query(sql, on: conn, with: values, expecting: dynamic.dynamic)
-      |> result.replace(Returned(0, []))
-    }
-  }
-
-  execution |> result.replace_error(Nil)
+    BasedError(code: code, name: "", message: message)
+  })
 }
 
 fn to_sqlite_values(values: List(Value)) -> List(sqlight.Value) {
