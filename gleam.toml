@@ -1,15 +1,15 @@
 name = "based_sqlite"
 version = "3.0.0"
 description = "A sqlite adapter for based"
-gleam = "~> 1.0"
 
-licences = ["Apache-2.0"]
+licences = ["MIT"]
 repository = { type = "github", user = "stndrs", repo = "based_sqlite" }
 
 [dependencies]
-gleam_stdlib = "~> 0.34 or ~> 1.0"
-sqlight = "~> 0.9"
-based = ">= 3.0.0 and < 4.0.0"
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+plume = { git = "https://github.com/stndrs/plume", ref = "main" }
+based = { git = "https://github.com/stndrs/based", ref = "v4" }
+gleam_time = ">= 1.7.0 and < 2.0.0"
 
 [dev-dependencies]
-gleeunit = "~> 1.0"
+gleeunit = ">= 1.0.0 and < 2.0.0"

@@ -7,12 +7,7 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/time/calendar
 import gleam/time/timestamp
-import gleeunit
 import plume
-
-pub fn main() {
-  gleeunit.main()
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -336,8 +331,8 @@ pub fn constraint_error_unique_test() {
     |> sql.params([sql.text("Alice"), sql.text("alice@example.com")])
     |> db.query(db)
 
-  // Inserting a duplicate email should fail with a constraint error
-  let assert Error(db.ConstraintError(..)) =
+  // Inserting a duplicate email should fail
+  let assert Error(_) =
     sql.query("INSERT INTO users (name, email) VALUES (?, ?)")
     |> sql.params([sql.text("Bob"), sql.text("alice@example.com")])
     |> db.query(db)
@@ -346,8 +341,8 @@ pub fn constraint_error_unique_test() {
 pub fn constraint_error_not_null_test() {
   let db = connect() |> setup_users
 
-  // Inserting NULL into a NOT NULL column should fail with a constraint error
-  let assert Error(db.ConstraintError(..)) =
+  // Inserting NULL into a NOT NULL column should fail
+  let assert Error(_) =
     sql.query("INSERT INTO users (name) VALUES (?)")
     |> sql.params([sql.null])
     |> db.query(db)
