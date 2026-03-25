@@ -7,20 +7,19 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/time/calendar
 import gleam/time/timestamp
-import plume
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn connect() -> db.Db(sql.Value, plume.Connection) {
+fn connect() -> db.Db(sql.Value, sqlite.Connection) {
   let assert Ok(db) = sqlite.db(":memory:")
   db
 }
 
 fn setup_users(
-  db: db.Db(sql.Value, plume.Connection),
-) -> db.Db(sql.Value, plume.Connection) {
+  db: db.Db(sql.Value, sqlite.Connection),
+) -> db.Db(sql.Value, sqlite.Connection) {
   let assert Ok(_) =
     db.execute(
       "CREATE TABLE users (
@@ -361,7 +360,7 @@ pub fn execute_syntax_error_test() {
 pub fn uuid_value_test() {
   let db = connect()
   let assert Ok(_) =
-    db.execute("CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT)", db)
+    db.execute("CREATE TABLE items (id TEXT PRIMARY KEY, name BLOB)", db)
 
   let assert Ok(id) = uuid.from_string("550e8400-e29b-41d4-a716-446655440000")
 
@@ -378,12 +377,12 @@ pub fn uuid_value_test() {
 
   // Decode the UUID text back
   let id_decoder = {
-    use id <- decode.field(0, decode.string)
+    use id <- decode.field(0, decode.bit_array)
     decode.success(id)
   }
   let assert Ok(returned) = db.decode(queried, id_decoder)
   let assert [stored_id] = returned.rows
-  assert stored_id == "550e8400-e29b-41d4-a716-446655440000"
+  assert stored_id == uuid.to_bit_array(id)
 }
 
 // ---------------------------------------------------------------------------

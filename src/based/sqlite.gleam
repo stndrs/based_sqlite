@@ -34,6 +34,10 @@ import gleam/result
 import gleam/string
 import plume
 
+pub opaque type Connection {
+  Connection(conn: plume.Connection)
+}
+
 /// Creates a new SQLite database connection and returns a fully configured
 /// `db.Db` handle.
 ///
@@ -51,22 +55,27 @@ import plume
 /// // File-based database
 /// let assert Ok(db) = sqlite.db("./my_app.db")
 /// ```
-pub fn db(
-  path: String,
-) -> Result(db.Db(sql.Value, plume.Connection), db.DbError) {
-  use conn <- result.map(
+pub fn db(path: String) -> Result(db.Db(sql.Value, Connection), db.DbError) {
+  let handle_connect = fn() {
     plume.config(path)
     |> plume.open()
-    |> result.map_error(to_db_error),
+    |> result.map(Connection)
+    |> result.map_error(to_db_error)
+  }
+
+  let handle_disconnect = fn(conn: Connection) {
+    plume.close(conn.conn)
+    |> result.replace_error(db.ConnectionError("Failed to disconnect"))
+  }
+
+  db.DriverBuilder(
+    handle_connect:,
+    handle_disconnect:,
+    handle_query:,
+    handle_execute:,
+    handle_batch:,
   )
-
-  let drv =
-    db.driver()
-    |> db.on_query(handle_query)
-    |> db.on_execute(handle_execute)
-    |> db.on_batch(handle_batch)
-
-  db.new(drv, sql.adapter(), conn)
+  |> db.build(sql.adapter())
 }
 
 /// Runs a callback inside a SQLite transaction.
@@ -87,8 +96,8 @@ pub fn db(
 /// })
 /// ```
 pub fn transaction(
-  db: db.Db(sql.Value, plume.Connection),
-  next: fn(db.Db(sql.Value, plume.Connection)) -> Result(t, error),
+  db: db.Db(sql.Value, Connection),
+  next: fn(db.Db(sql.Value, Connection)) -> Result(t, error),
 ) -> Result(t, db.TransactionError(error)) {
   db.transaction(db, tx_handler, next)
 }
@@ -98,10 +107,10 @@ pub fn transaction(
 // ---------------------------------------------------------------------------
 
 fn tx_handler(
-  conn: plume.Connection,
-  next: fn(plume.Connection) -> Result(t, error),
+  conn: Connection,
+  next: fn(Connection) -> Result(t, error),
 ) -> Result(t, db.TransactionError(error)) {
-  plume.transaction(conn, next)
+  plume.transaction(conn.conn, fn(plume_conn) { Connection(plume_conn) |> next })
   |> result.map_error(to_tx_error)
 }
 
@@ -111,26 +120,23 @@ fn tx_handler(
 
 fn handle_query(
   query: sql.Query(sql.Value),
-  conn: plume.Connection,
+  conn: Connection,
 ) -> Result(db.Queried, db.DbError) {
   let values = list.map(query.values, to_plume_value)
 
-  plume.query(query.sql, values, conn)
+  plume.query(query.sql, values, conn.conn)
   |> result.map(to_db_queried)
   |> result.map_error(to_db_error)
 }
 
-fn handle_execute(
-  sql: String,
-  conn: plume.Connection,
-) -> Result(Int, db.DbError) {
-  plume.exec(sql, on: conn)
+fn handle_execute(sql: String, conn: Connection) -> Result(Int, db.DbError) {
+  plume.exec(sql, on: conn.conn)
   |> result.map_error(to_db_error)
 }
 
 fn handle_batch(
   queries: List(sql.Query(sql.Value)),
-  conn: plume.Connection,
+  conn: Connection,
 ) -> Result(List(db.Queried), db.DbError) {
   list.try_map(queries, fn(query) { handle_query(query, conn) })
 }
@@ -151,7 +157,7 @@ fn to_plume_value(value: sql.Value) -> plume.Value {
     sql.Time(t) -> plume.Time(t)
     sql.Datetime(d, t) -> plume.Datetime(d, t)
     sql.Timestamp(ts) -> plume.Timestamp(ts)
-    sql.Uuid(u) -> plume.Text(uuid.to_string(u))
+    sql.Uuid(u) -> plume.Bytea(uuid.to_bit_array(u))
     sql.Timestamptz(ts, _offset) -> plume.Timestamp(ts)
     sql.Interval(iv) -> plume.Text(interval.to_iso8601_string(iv))
     sql.Array(vals) -> plume.Text(array_to_json(vals))
