@@ -2,7 +2,7 @@
 
 [![Package Version](https://img.shields.io/hexpm/v/based_sqlite)](https://hex.pm/packages/based_sqlite)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/based_sqlite/)
-![LLM Usage](https://img.shields.io/badge/LLM%20Usage-Pure%20Vibes-red)
+![LLM Usage](https://img.shields.io/badge/LLM%20Usage-Human%20Verified-orange)
 
 A [SQLite](https://sqlite.org/) adapter for [`based`](https://github.com/stndrs/based),
 powered by [`plume`](https://github.com/stndrs/plume).
