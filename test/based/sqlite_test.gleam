@@ -542,10 +542,6 @@ pub fn array_value_test() {
   assert tags_json == "[\"foo\",\"bar\",\"baz\"]"
 }
 
-// ---------------------------------------------------------------------------
-// Multiple params test
-// ---------------------------------------------------------------------------
-
 pub fn multiple_params_test() {
   let db = connect() |> setup_users
 
@@ -572,25 +568,31 @@ pub fn multiple_params_test() {
     |> db.all(db, full_decoder)
 }
 
-// ---------------------------------------------------------------------------
-// Query builder integration test (using based/sql builder API)
-// ---------------------------------------------------------------------------
-
 pub fn query_builder_integration_test() {
   let db = connect() |> setup_users
 
-  let assert Ok(_) =
-    db.execute("INSERT INTO users (name, age) VALUES ('Alice', 30)", db)
-  let assert Ok(_) =
-    db.execute("INSERT INTO users (name, age) VALUES ('Bob', 25)", db)
-  let assert Ok(_) =
-    db.execute("INSERT INTO users (name, age) VALUES ('Charlie', 35)", db)
+  let users = sql.table("users")
 
-  // Use the query builder to construct a SELECT
-  let users_table = sql.table("users")
+  let user_inserter = {
+    use <- sql.val("name", fn(u: #(String, Int)) { sql.text(u.0) })
+    use <- sql.val("age", fn(u: #(String, Int)) { sql.int(u.1) })
+    sql.row()
+  }
+
+  let values = [
+    #("Alice", 30),
+    #("Bob", 25),
+    #("Charlie", 35),
+  ]
+
+  let assert Ok(_) =
+    sql.insert(into: users)
+    |> sql.values(user_inserter, values)
+    |> sql.to_query(db.adapter)
+    |> db.query(db)
 
   let query =
-    sql.from(users_table)
+    sql.from(users)
     |> sql.select([sql.col("name")])
     |> sql.where([sql.gt(sql.col("age"), sql.int(28), of: sql.value)])
     |> sql.order_by(sql.col("name"), sql.asc)
@@ -605,48 +607,56 @@ pub fn query_builder_integration_test() {
   assert names == ["Alice", "Charlie"]
 }
 
-// ---------------------------------------------------------------------------
-// Empty result test
-// ---------------------------------------------------------------------------
-
 pub fn empty_result_test() {
   let db = connect() |> setup_users
 
   let assert Ok(queried) =
-    sql.query("SELECT id, name FROM users")
+    sql.table("users")
+    |> sql.from
+    |> sql.select([sql.col("id"), sql.col("name")])
+    |> sql.to_query(db.adapter)
     |> db.query(db)
 
   assert queried.count == 0
   assert queried.rows == []
 }
 
-// ---------------------------------------------------------------------------
-// Multiple operations on same connection
-// ---------------------------------------------------------------------------
-
 pub fn multiple_operations_test() {
   let db = connect() |> setup_users
 
-  // Insert multiple rows
+  let users = sql.table("users")
+
+  let name_inserter = {
+    use <- sql.val("name", fn(name: String) { sql.text(name) })
+    sql.row()
+  }
+
   let assert Ok(_) =
-    sql.query("INSERT INTO users (name) VALUES (?)")
-    |> sql.params([sql.text("Alice")])
+    sql.insert(into: users)
+    |> sql.values(name_inserter, ["Alice"])
+    |> sql.to_query(db.adapter)
     |> db.query(db)
 
   let assert Ok(_) =
-    sql.query("INSERT INTO users (name) VALUES (?)")
-    |> sql.params([sql.text("Bob")])
+    sql.insert(into: users)
+    |> sql.values(name_inserter, ["Bob"])
+    |> sql.to_query(db.adapter)
     |> db.query(db)
 
-  // Update
   let assert Ok(_) =
-    db.execute("UPDATE users SET name = 'Robert' WHERE name = 'Bob'", db)
+    sql.update(users)
+    |> sql.set("name", sql.text("Robert"), of: sql.value)
+    |> sql.where([sql.col("name") |> sql.eq(sql.text("Bob"), of: sql.value)])
+    |> sql.to_query(db.adapter)
+    |> db.query(db)
 
-  // Verify
-  let assert Ok(users) =
-    sql.query("SELECT id, name FROM users ORDER BY name")
+  let assert Ok(queried) =
+    sql.from(users)
+    |> sql.select([sql.col("id"), sql.col("name")])
+    |> sql.order_by(sql.col("name"), sql.asc)
+    |> sql.to_query(db.adapter)
     |> db.all(db, user_decoder())
 
-  assert list.length(users) == 2
-  let assert [#(_, "Alice"), #(_, "Robert")] = users
+  assert list.length(queried) == 2
+  let assert [#(_, "Alice"), #(_, "Robert")] = queried
 }

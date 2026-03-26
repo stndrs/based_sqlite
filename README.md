@@ -17,6 +17,7 @@ gleam add based_sqlite
 import based/db
 import based/sql
 import based/sqlite
+import gleam/dynamic/decode
 
 pub fn main() {
   // Open an in-memory database (or pass a file path like "./my_app.db")
@@ -24,18 +25,38 @@ pub fn main() {
 
   // Create a table
   let assert Ok(_) =
-    db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)", database)
+    db.execute(
+      "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+      database,
+    )
+
+  // Define an inserter for the users table
+  let user_inserter = {
+    use <- sql.val("name", fn(name: String) { sql.text(name) })
+    sql.row()
+  }
+
+  let users = sql.table("users")
 
   // Insert a row using the query builder
   let assert Ok(_) =
-    sql.query("INSERT INTO users (name) VALUES (?)")
-    |> sql.params([sql.text("Alice")])
+    sql.insert(into: users)
+    |> sql.values(user_inserter, ["Alice"])
+    |> sql.to_query(database.adapter)
     |> db.query(database)
 
   // Read it back
-  let assert Ok(users) =
-    sql.query("SELECT id, name FROM users")
-    |> db.all(database, db.decode2(UserRow, db.int, db.text))
+  let user_decoder = {
+    use id <- decode.field(0, decode.int)
+    use name <- decode.field(1, decode.string)
+    decode.success(#(id, name))
+  }
+
+  let assert Ok(rows) =
+    sql.from(users)
+    |> sql.select([sql.col("id"), sql.col("name")])
+    |> sql.to_query(database.adapter)
+    |> db.all(database, user_decoder)
 }
 ```
 
@@ -49,14 +70,29 @@ If the callback returns `Ok`, the transaction is committed; if it returns
 let assert Ok(database) = sqlite.db(":memory:")
 
 let assert Ok(_) =
-  db.execute("CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER NOT NULL)", database)
+  db.execute(
+    "CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER NOT NULL)",
+    database,
+  )
+
+let accounts = sql.table("accounts")
 
 let assert Ok(Nil) =
   sqlite.transaction(database, fn(tx) {
     let assert Ok(_) =
-      db.execute("UPDATE accounts SET balance = balance - 100 WHERE id = 1", tx)
+      sql.update(accounts)
+      |> sql.set("balance", sql.int(-100), of: sql.value)
+      |> sql.where([sql.eq(sql.col("id"), sql.int(1), of: sql.value)])
+      |> sql.to_query(tx.adapter)
+      |> db.query(tx)
+
     let assert Ok(_) =
-      db.execute("UPDATE accounts SET balance = balance + 100 WHERE id = 2", tx)
+      sql.update(accounts)
+      |> sql.set("balance", sql.int(100), of: sql.value)
+      |> sql.where([sql.eq(sql.col("id"), sql.int(2), of: sql.value)])
+      |> sql.to_query(tx.adapter)
+      |> db.query(tx)
+
     Ok(Nil)
   })
 ```

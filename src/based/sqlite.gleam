@@ -4,26 +4,6 @@
 //// (the SQLite driver), providing a `db` function that returns a
 //// fully configured `db.Db` handle for executing queries against a SQLite
 //// database.
-////
-//// ## Example
-////
-//// ```gleam
-//// import based/db
-//// import based/sql
-//// import based/sqlite
-////
-//// pub fn main() {
-////   let assert Ok(db) = sqlite.db(":memory:")
-////
-////   let assert Ok(_) =
-////     db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)", db)
-////
-////   let assert Ok(_) =
-////     sql.query("INSERT INTO users (name) VALUES (?)")
-////     |> sql.params([sql.text("Alice")])
-////     |> db.query(db)
-//// }
-//// ```
 
 import based/db
 import based/interval
@@ -32,6 +12,7 @@ import based/uuid
 import gleam/list
 import gleam/result
 import gleam/string
+import gleam/time/calendar
 import plume
 
 pub opaque type Connection {
@@ -39,62 +20,28 @@ pub opaque type Connection {
 }
 
 /// Creates a new SQLite database connection and returns a fully configured
-/// `db.Db` handle.
+/// `db.Db` record.
 ///
 /// The `path` argument is either a file path to a SQLite database file
 /// or `":memory:"` for an in-memory database.
 ///
 /// Returns `Error(db.ConnectionError(...))` if the connection cannot be opened.
-///
-/// ## Example
-///
-/// ```gleam
-/// // In-memory database
-/// let assert Ok(db) = sqlite.db(":memory:")
-///
-/// // File-based database
-/// let assert Ok(db) = sqlite.db("./my_app.db")
-/// ```
 pub fn db(path: String) -> Result(db.Db(sql.Value, Connection), db.DbError) {
-  let handle_connect = fn() {
-    plume.config(path)
-    |> plume.open()
-    |> result.map(Connection)
-    |> result.map_error(to_db_error)
-  }
-
-  let handle_disconnect = fn(conn: Connection) {
-    plume.close(conn.conn)
-    |> result.replace_error(db.ConnectionError("Failed to disconnect"))
-  }
-
-  db.DriverBuilder(
-    handle_connect:,
-    handle_disconnect:,
-    handle_query:,
-    handle_execute:,
-    handle_batch:,
-  )
-  |> db.build(sql.adapter())
+  plume.config(path)
+  |> plume.open()
+  |> result.map(fn(conn) {
+    Connection(conn)
+    |> db.driver(handle_query:, handle_execute:, handle_batch:)
+    |> db.new(sql.adapter())
+  })
+  |> result.map_error(to_db_error)
 }
 
 /// Runs a callback inside a SQLite transaction.
 ///
-/// The callback receives a `db.Db` handle scoped to the transaction.
+/// The callback receives a `db.Db` record scoped to the transaction.
 /// If the callback returns `Ok`, the transaction is committed.
-/// If it returns `Error`, the transaction is rolled back.
-///
-/// ## Example
-///
-/// ```gleam
-/// let assert Ok(db) = sqlite.db(":memory:")
-///
-/// sqlite.transaction(db, fn(tx) {
-///   let assert Ok(_) =
-///     db.execute("INSERT INTO users (name) VALUES ('Bob')", tx)
-///   Ok(Nil)
-/// })
-/// ```
+/// If it returns `Error` or crashes, the transaction is rolled back.
 pub fn transaction(
   db: db.Db(sql.Value, Connection),
   next: fn(db.Db(sql.Value, Connection)) -> Result(t, error),
@@ -421,9 +368,3 @@ fn to_tx_error(err: plume.TransactionError(error)) -> db.TransactionError(error)
     plume.TransactionError(message:) -> db.TransactionError(message:)
   }
 }
-
-// ---------------------------------------------------------------------------
-// Re-export calendar for date/time formatting
-// ---------------------------------------------------------------------------
-
-import gleam/time/calendar

@@ -8,7 +8,7 @@ repository = { type = "github", user = "stndrs", repo = "based_sqlite" }
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
 plume = { git = "https://github.com/stndrs/plume", ref = "main" }
-based = { git = "https://github.com/stndrs/based", ref = "v4" }
+based = { git = "https://github.com/stndrs/based", ref = "main" }
 gleam_time = ">= 1.7.0 and < 2.0.0"
 
 [dev-dependencies]
