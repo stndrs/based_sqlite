@@ -13,8 +13,15 @@ import gleam/time/timestamp
 // ---------------------------------------------------------------------------
 
 fn connect() -> db.Db(sql.Value, sqlite.Connection) {
-  let assert Ok(db) = sqlite.db(":memory:")
-  db
+  sqlite.config(":memory:")
+  |> sqlite.new
+}
+
+fn with_connection(
+  next: fn(db.Db(sql.Value, sqlite.Connection)) -> t,
+) -> Result(t, db.DbError) {
+  sqlite.config(":memory:")
+  |> sqlite.with_connection(next)
 }
 
 fn setup_users(
@@ -44,13 +51,16 @@ fn user_decoder() -> decode.Decoder(#(Int, String)) {
 // Connection tests
 // ---------------------------------------------------------------------------
 
-pub fn adapter_memory_test() {
-  let assert Ok(_db) = sqlite.db(":memory:")
+pub fn with_connection_test() {
+  let assert Ok("ok") =
+    sqlite.config(":memory:")
+    |> sqlite.with_connection(fn(_db) { "ok" })
 }
 
-pub fn adapter_connection_error_test() {
+pub fn with_connection_error_test() {
   let assert Error(db.ConnectionError(_)) =
-    sqlite.db("/nonexistent/path/to/nowhere/db.sqlite")
+    sqlite.config("/nonexistent/path/to/nowhere/db.sqlite")
+    |> sqlite.with_connection(fn(_db) { "ok" })
 }
 
 // ---------------------------------------------------------------------------
@@ -64,7 +74,9 @@ pub fn execute_create_table_test() {
 }
 
 pub fn execute_returns_affected_count_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) = db.execute("INSERT INTO users (name) VALUES ('Alice')", db)
   let assert Ok(_) = db.execute("INSERT INTO users (name) VALUES ('Bob')", db)
@@ -80,7 +92,9 @@ pub fn execute_returns_affected_count_test() {
 // ---------------------------------------------------------------------------
 
 pub fn query_insert_and_select_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) =
     sql.query("INSERT INTO users (name) VALUES (?)")
@@ -96,7 +110,9 @@ pub fn query_insert_and_select_test() {
 }
 
 pub fn query_with_int_param_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) =
     db.execute("INSERT INTO users (name, age) VALUES ('Alice', 30)", db)
@@ -112,7 +128,9 @@ pub fn query_with_int_param_test() {
 }
 
 pub fn query_with_float_param_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) =
     db.execute("INSERT INTO users (name, score) VALUES ('Alice', 9.5)", db)
@@ -126,7 +144,10 @@ pub fn query_with_float_param_test() {
 }
 
 pub fn query_with_bool_param_test() {
-  let db = connect()
+  use db <- with_connection()
+
+  setup_users(db)
+
   let assert Ok(_) =
     db.execute(
       "CREATE TABLE flags (id INTEGER PRIMARY KEY, active INTEGER NOT NULL)",
@@ -146,7 +167,9 @@ pub fn query_with_bool_param_test() {
 }
 
 pub fn query_with_null_param_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) =
     sql.query("INSERT INTO users (name, email) VALUES (?, ?)")
@@ -161,7 +184,10 @@ pub fn query_with_null_param_test() {
 }
 
 pub fn query_with_bytea_param_test() {
-  let db = connect()
+  use db <- with_connection()
+
+  setup_users(db)
+
   let assert Ok(_) =
     db.execute("CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB)", db)
 
@@ -179,7 +205,9 @@ pub fn query_with_bytea_param_test() {
 }
 
 pub fn query_with_text_param_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) =
     sql.query("INSERT INTO users (name) VALUES (?)")
@@ -199,7 +227,9 @@ pub fn query_with_text_param_test() {
 // ---------------------------------------------------------------------------
 
 pub fn all_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) = db.execute("INSERT INTO users (name) VALUES ('Alice')", db)
   let assert Ok(_) = db.execute("INSERT INTO users (name) VALUES ('Bob')", db)
@@ -213,7 +243,9 @@ pub fn all_test() {
 }
 
 pub fn one_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) = db.execute("INSERT INTO users (name) VALUES ('Alice')", db)
 
@@ -226,7 +258,9 @@ pub fn one_test() {
 }
 
 pub fn one_not_found_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Error(db.NotFound) =
     sql.query("SELECT id, name FROM users WHERE name = ?")
@@ -239,7 +273,9 @@ pub fn one_not_found_test() {
 // ---------------------------------------------------------------------------
 
 pub fn batch_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let queries = [
     sql.query("INSERT INTO users (name) VALUES (?)")
@@ -265,7 +301,9 @@ pub fn batch_test() {
 // ---------------------------------------------------------------------------
 
 pub fn transaction_commit_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(Nil) =
     sqlite.transaction(db, fn(tx) {
@@ -285,7 +323,9 @@ pub fn transaction_commit_test() {
 }
 
 pub fn transaction_rollback_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Error(db.Rollback("oops")) =
     sqlite.transaction(db, fn(tx) {
@@ -305,7 +345,7 @@ pub fn transaction_rollback_test() {
 }
 
 pub fn transaction_return_value_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
 
   let assert Ok(42) = sqlite.transaction(db, fn(_tx) { Ok(42) })
 }
@@ -323,11 +363,22 @@ pub fn syntax_error_test() {
 }
 
 pub fn constraint_error_unique_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
+
+  let users = sql.table("users")
+
+  let rows = {
+    sql.rows([#("Alice", "alice@example.com")])
+    |> sql.val("name", fn(user) { sql.text(user.0) })
+    |> sql.val("email", fn(user) { sql.text(user.1) })
+  }
 
   let assert Ok(_) =
-    sql.query("INSERT INTO users (name, email) VALUES (?, ?)")
-    |> sql.params([sql.text("Alice"), sql.text("alice@example.com")])
+    sql.insert(into: users)
+    |> sql.values(rows)
+    |> sql.to_query(db.adapter)
     |> db.query(db)
 
   // Inserting a duplicate email should fail
@@ -358,7 +409,8 @@ pub fn execute_syntax_error_test() {
 // ---------------------------------------------------------------------------
 
 pub fn uuid_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE items (id TEXT PRIMARY KEY, name BLOB)", db)
 
@@ -390,7 +442,8 @@ pub fn uuid_value_test() {
 // ---------------------------------------------------------------------------
 
 pub fn date_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, date TEXT)", db)
 
@@ -408,7 +461,8 @@ pub fn date_value_test() {
 }
 
 pub fn time_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE logs (id INTEGER PRIMARY KEY, time TEXT)", db)
 
@@ -426,7 +480,8 @@ pub fn time_value_test() {
 }
 
 pub fn datetime_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute(
       "CREATE TABLE records (id INTEGER PRIMARY KEY, created_at TEXT)",
@@ -448,7 +503,8 @@ pub fn datetime_value_test() {
 }
 
 pub fn timestamp_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE stamps (id INTEGER PRIMARY KEY, ts TEXT)", db)
 
@@ -470,7 +526,8 @@ pub fn timestamp_value_test() {
 // ---------------------------------------------------------------------------
 
 pub fn timestamptz_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE stamps_tz (id INTEGER PRIMARY KEY, ts TEXT)", db)
 
@@ -493,7 +550,8 @@ pub fn timestamptz_value_test() {
 // ---------------------------------------------------------------------------
 
 pub fn interval_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE durations (id INTEGER PRIMARY KEY, dur TEXT)", db)
 
@@ -516,7 +574,8 @@ pub fn interval_value_test() {
 // ---------------------------------------------------------------------------
 
 pub fn array_value_test() {
-  let db = connect()
+  use db <- with_connection()
+
   let assert Ok(_) =
     db.execute(
       "CREATE TABLE tags_table (id INTEGER PRIMARY KEY, tags TEXT)",
@@ -543,7 +602,9 @@ pub fn array_value_test() {
 }
 
 pub fn multiple_params_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(_) =
     sql.query("INSERT INTO users (name, email, age, score) VALUES (?, ?, ?, ?)")
@@ -569,25 +630,25 @@ pub fn multiple_params_test() {
 }
 
 pub fn query_builder_integration_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let users = sql.table("users")
 
-  let user_inserter = {
-    use <- sql.val("name", fn(u: #(String, Int)) { sql.text(u.0) })
-    use <- sql.val("age", fn(u: #(String, Int)) { sql.int(u.1) })
-    sql.row()
+  let rows = {
+    sql.rows([
+      #("Alice", 30),
+      #("Bob", 25),
+      #("Charlie", 35),
+    ])
+    |> sql.val("name", fn(user) { sql.text(user.0) })
+    |> sql.val("age", fn(user) { sql.int(user.1) })
   }
-
-  let values = [
-    #("Alice", 30),
-    #("Bob", 25),
-    #("Charlie", 35),
-  ]
 
   let assert Ok(_) =
     sql.insert(into: users)
-    |> sql.values(user_inserter, values)
+    |> sql.values(rows)
     |> sql.to_query(db.adapter)
     |> db.query(db)
 
@@ -608,7 +669,9 @@ pub fn query_builder_integration_test() {
 }
 
 pub fn empty_result_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let assert Ok(queried) =
     sql.table("users")
@@ -622,24 +685,20 @@ pub fn empty_result_test() {
 }
 
 pub fn multiple_operations_test() {
-  let db = connect() |> setup_users
+  use db <- with_connection()
+
+  setup_users(db)
 
   let users = sql.table("users")
 
   let name_inserter = {
-    use <- sql.val("name", fn(name: String) { sql.text(name) })
-    sql.row()
+    sql.rows(["Alice", "Bob"])
+    |> sql.val("name", sql.text)
   }
 
   let assert Ok(_) =
     sql.insert(into: users)
-    |> sql.values(name_inserter, ["Alice"])
-    |> sql.to_query(db.adapter)
-    |> db.query(db)
-
-  let assert Ok(_) =
-    sql.insert(into: users)
-    |> sql.values(name_inserter, ["Bob"])
+    |> sql.values(name_inserter)
     |> sql.to_query(db.adapter)
     |> db.query(db)
 

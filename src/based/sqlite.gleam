@@ -16,23 +16,59 @@ import gleam/time/calendar
 import plume
 
 pub opaque type Connection {
+  Database(config: Config)
   Connection(conn: plume.Connection)
 }
 
-/// Creates a new SQLite database connection and returns a fully configured
-/// `db.Db` record.
+pub type Config {
+  Config(db: String)
+}
+
+pub fn config(db: String) -> Config {
+  Config(db:)
+}
+
+/// Creates a fully configured `db.Db` record. This function does not open a
+/// connection to the configured sqlite database. Passing the `db.Db` record
+/// to a query function (e.g. `based/db.query`) will open the connection,
+/// perform the query, and then close the connection.
 ///
-/// The `path` argument is either a file path to a SQLite database file
-/// or `":memory:"` for an in-memory database.
-///
-/// Returns `Error(db.ConnectionError(...))` if the connection cannot be opened.
-pub fn db(path: String) -> Result(db.Db(sql.Value, Connection), db.DbError) {
-  plume.config(path)
-  |> plume.open()
-  |> result.map(fn(conn) {
-    Connection(conn)
-    |> db.driver(handle_query:, handle_execute:, handle_batch:)
-    |> db.new(sql.adapter())
+/// To work with a `db.Db` that keeps the sqlite connection open for as long
+/// as you need, use the `with_connection` function.
+pub fn new(config: Config) -> db.Db(sql.Value, Connection) {
+  config
+  |> Database
+  |> db.driver(
+    on_query: handle_query,
+    on_execute: handle_execute,
+    on_batch: handle_batch,
+  )
+  |> db.new(sql.adapter())
+}
+
+/// Connects to the configured sqlite database and remains open until the callback
+/// completes.
+pub fn with_connection(
+  config: Config,
+  next: fn(db.Db(sql.Value, Connection)) -> t,
+) -> Result(t, db.DbError) {
+  plume.config(config.db)
+  |> plume.open
+  |> result.try(fn(conn) {
+    let db =
+      Connection(conn)
+      |> db.driver(
+        on_query: handle_query,
+        on_execute: handle_execute,
+        on_batch: handle_batch,
+      )
+      |> db.new(sql.adapter())
+
+    let res = next(db)
+
+    let _ = plume.close(conn)
+
+    Ok(res)
   })
   |> result.map_error(to_db_error)
 }
@@ -57,8 +93,61 @@ fn tx_handler(
   conn: Connection,
   next: fn(Connection) -> Result(t, error),
 ) -> Result(t, db.TransactionError(error)) {
-  plume.transaction(conn.conn, fn(plume_conn) { Connection(plume_conn) |> next })
+  case conn {
+    Database(config:) -> {
+      config
+      |> inner_tx_connection
+      |> result.try(fn(conn) {
+        let res = inner_tx(conn, next)
+
+        let _ = plume.close(conn)
+
+        res
+      })
+    }
+    Connection(conn:) -> inner_tx(conn, next)
+  }
+}
+
+fn inner_tx_connection(
+  config: Config,
+) -> Result(plume.Connection, db.TransactionError(error)) {
+  plume.config(config.db)
+  |> plume.open
+  |> result.map_error(fn(err) {
+    to_db_error(err)
+    |> db.error_to_string
+    |> db.TransactionError
+  })
+}
+
+fn inner_tx(
+  conn: plume.Connection,
+  next: fn(Connection) -> Result(t, error),
+) -> Result(t, db.TransactionError(error)) {
+  plume.transaction(conn, fn(plume_conn) { Connection(plume_conn) |> next })
   |> result.map_error(to_tx_error)
+}
+
+fn with_single_connection(
+  conn: Connection,
+  next: fn(plume.Connection) -> Result(t, db.DbError),
+) -> Result(t, db.DbError) {
+  case conn {
+    Database(config:) -> {
+      plume.config(config.db)
+      |> plume.open
+      |> result.map_error(to_db_error)
+      |> result.try(fn(conn) {
+        let res = next(conn)
+
+        let _ = plume.close(conn)
+
+        res
+      })
+    }
+    Connection(conn:) -> next(conn)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -71,13 +160,17 @@ fn handle_query(
 ) -> Result(db.Queried, db.DbError) {
   let values = list.map(query.values, to_plume_value)
 
-  plume.query(query.sql, values, conn.conn)
+  use conn <- with_single_connection(conn)
+
+  plume.query(query.sql, values, conn)
   |> result.map(to_db_queried)
   |> result.map_error(to_db_error)
 }
 
 fn handle_execute(sql: String, conn: Connection) -> Result(Int, db.DbError) {
-  plume.exec(sql, on: conn.conn)
+  use conn <- with_single_connection(conn)
+
+  plume.exec(sql, on: conn)
   |> result.map_error(to_db_error)
 }
 
@@ -85,7 +178,15 @@ fn handle_batch(
   queries: List(sql.Query(sql.Value)),
   conn: Connection,
 ) -> Result(List(db.Queried), db.DbError) {
-  list.try_map(queries, fn(query) { handle_query(query, conn) })
+  use conn <- with_single_connection(conn)
+
+  use query <- list.try_map(queries)
+
+  let values = list.map(query.values, to_plume_value)
+
+  plume.query(query.sql, values, conn)
+  |> result.map(to_db_queried)
+  |> result.map_error(to_db_error)
 }
 
 // ---------------------------------------------------------------------------
