@@ -378,7 +378,7 @@ pub fn constraint_error_unique_test() {
   let assert Ok(_) =
     sql.insert(into: users)
     |> sql.values(rows)
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
     |> db.query(db)
 
   // Inserting a duplicate email should fail
@@ -649,7 +649,7 @@ pub fn query_builder_integration_test() {
   let assert Ok(_) =
     sql.insert(into: users)
     |> sql.values(rows)
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
     |> db.query(db)
 
   let query =
@@ -657,7 +657,7 @@ pub fn query_builder_integration_test() {
     |> sql.select([sql.col("name")])
     |> sql.where([sql.gt(sql.col("age"), sql.int(28), of: sql.value)])
     |> sql.order_by(sql.col("name"), sql.asc)
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
 
   let name_decoder = {
     use name <- decode.field(0, decode.string)
@@ -677,7 +677,7 @@ pub fn empty_result_test() {
     sql.table("users")
     |> sql.from
     |> sql.select([sql.col("id"), sql.col("name")])
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
     |> db.query(db)
 
   assert queried.count == 0
@@ -699,21 +699,21 @@ pub fn multiple_operations_test() {
   let assert Ok(_) =
     sql.insert(into: users)
     |> sql.values(name_inserter)
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
     |> db.query(db)
 
   let assert Ok(_) =
     sql.update(users)
     |> sql.set("name", sql.text("Robert"), of: sql.value)
     |> sql.where([sql.col("name") |> sql.eq(sql.text("Bob"), of: sql.value)])
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
     |> db.query(db)
 
   let assert Ok(queried) =
     sql.from(users)
     |> sql.select([sql.col("id"), sql.col("name")])
     |> sql.order_by(sql.col("name"), sql.asc)
-    |> sql.to_query(db.adapter)
+    |> db.to_sql_query(db)
     |> db.all(db, user_decoder())
 
   assert list.length(queried) == 2
