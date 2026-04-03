@@ -14,7 +14,7 @@ import gleam/time/timestamp
 
 fn connect() -> db.Db(sql.Value, sqlite.Connection) {
   sqlite.config(":memory:")
-  |> sqlite.new
+  |> sqlite.db
 }
 
 fn with_connection(
@@ -27,17 +27,17 @@ fn with_connection(
 fn setup_users(
   db: db.Db(sql.Value, sqlite.Connection),
 ) -> db.Db(sql.Value, sqlite.Connection) {
-  let assert Ok(_) =
-    db.execute(
-      "CREATE TABLE users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE,
-        age INTEGER,
-        score REAL
-      )",
-      db,
-    )
+  let create_users_table =
+    "CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE,
+    age INTEGER,
+    score REAL
+  )"
+
+  let assert Ok(_) = db.execute(create_users_table, db)
+
   db
 }
 
@@ -58,7 +58,7 @@ pub fn with_connection_test() {
 }
 
 pub fn with_connection_error_test() {
-  let assert Error(db.ConnectionError(_)) =
+  let assert Error(db.ConnectionError("connection failed")) =
     sqlite.config("/nonexistent/path/to/nowhere/db.sqlite")
     |> sqlite.with_connection(fn(_db) { "ok" })
 }
@@ -69,6 +69,7 @@ pub fn with_connection_error_test() {
 
 pub fn execute_create_table_test() {
   let db = connect()
+
   let assert Ok(_) =
     db.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)", db)
 }
@@ -371,14 +372,14 @@ pub fn constraint_error_unique_test() {
 
   let rows = {
     sql.rows([#("Alice", "alice@example.com")])
-    |> sql.val("name", fn(user) { sql.text(user.0) })
-    |> sql.val("email", fn(user) { sql.text(user.1) })
+    |> sql.value("name", fn(user) { sql.text(user.0) })
+    |> sql.value("email", fn(user) { sql.text(user.1) })
   }
 
   let assert Ok(_) =
     sql.insert(into: users)
     |> sql.values(rows)
-    |> db.to_sql_query(db)
+    |> db.to_query(db)
     |> db.query(db)
 
   // Inserting a duplicate email should fail
@@ -642,22 +643,22 @@ pub fn query_builder_integration_test() {
       #("Bob", 25),
       #("Charlie", 35),
     ])
-    |> sql.val("name", fn(user) { sql.text(user.0) })
-    |> sql.val("age", fn(user) { sql.int(user.1) })
+    |> sql.value("name", fn(user) { sql.text(user.0) })
+    |> sql.value("age", fn(user) { sql.int(user.1) })
   }
 
   let assert Ok(_) =
     sql.insert(into: users)
     |> sql.values(rows)
-    |> db.to_sql_query(db)
+    |> db.to_query(db)
     |> db.query(db)
 
   let query =
     sql.from(users)
-    |> sql.select([sql.col("name")])
-    |> sql.where([sql.gt(sql.col("age"), sql.int(28), of: sql.value)])
-    |> sql.order_by(sql.col("name"), sql.asc)
-    |> db.to_sql_query(db)
+    |> sql.select([sql.column("name")])
+    |> sql.where([sql.gt(sql.column("age"), sql.int(28), of: sql.val)])
+    |> sql.order_by(sql.column("name"), sql.asc)
+    |> db.to_query(db)
 
   let name_decoder = {
     use name <- decode.field(0, decode.string)
@@ -676,8 +677,8 @@ pub fn empty_result_test() {
   let assert Ok(queried) =
     sql.table("users")
     |> sql.from
-    |> sql.select([sql.col("id"), sql.col("name")])
-    |> db.to_sql_query(db)
+    |> sql.select([sql.column("id"), sql.column("name")])
+    |> db.to_query(db)
     |> db.query(db)
 
   assert queried.count == 0
@@ -693,27 +694,27 @@ pub fn multiple_operations_test() {
 
   let name_inserter = {
     sql.rows(["Alice", "Bob"])
-    |> sql.val("name", sql.text)
+    |> sql.value("name", sql.text)
   }
 
   let assert Ok(_) =
     sql.insert(into: users)
     |> sql.values(name_inserter)
-    |> db.to_sql_query(db)
+    |> db.to_query(db)
     |> db.query(db)
 
   let assert Ok(_) =
     sql.update(users)
-    |> sql.set("name", sql.text("Robert"), of: sql.value)
-    |> sql.where([sql.col("name") |> sql.eq(sql.text("Bob"), of: sql.value)])
-    |> db.to_sql_query(db)
+    |> sql.set("name", sql.text("Robert"), of: sql.val)
+    |> sql.where([sql.column("name") |> sql.eq(sql.text("Bob"), of: sql.val)])
+    |> db.to_query(db)
     |> db.query(db)
 
   let assert Ok(queried) =
     sql.from(users)
-    |> sql.select([sql.col("id"), sql.col("name")])
-    |> sql.order_by(sql.col("name"), sql.asc)
-    |> db.to_sql_query(db)
+    |> sql.select([sql.column("id"), sql.column("name")])
+    |> sql.order_by(sql.column("name"), sql.asc)
+    |> db.to_query(db)
     |> db.all(db, user_decoder())
 
   assert list.length(queried) == 2
