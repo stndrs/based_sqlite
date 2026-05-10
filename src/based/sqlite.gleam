@@ -2,17 +2,13 @@
 ////
 //// This module bridges `based` (the generic DB interface) with `plume`
 //// (the SQLite driver), providing a `db` function that returns a
-//// fully configured `db.Db` handle for executing queries against a SQLite
+//// fully configured `based.Db` handle for executing queries against a SQLite
 //// database.
 
-import based/db
-import based/interval
+import based
 import based/sql
-import based/uuid
 import gleam/list
 import gleam/result
-import gleam/string
-import gleam/time/calendar
 import plume
 
 pub opaque type Connection {
@@ -27,40 +23,40 @@ pub fn config(db: String) -> Config {
   Config(db:)
 }
 
-/// Creates a fully configured `db.Db` record. This function does not open a
-/// connection to the configured sqlite database. Passing the `db.Db` record
-/// to a query function (e.g. `based/db.query`) will open the connection,
+/// Creates a fully configured `based.Db` record. This function does not open a
+/// connection to the configured sqlite database. Passing the `based.Db` record
+/// to a query function (e.g. `based/based.query`) will open the connection,
 /// perform the query, and then close the connection.
 ///
-/// To work with a `db.Db` that keeps the sqlite connection open for as long
+/// To work with a `based.Db` that keeps the sqlite connection open for as long
 /// as you need, use the `with_connection` function.
-pub fn db(config: Config) -> db.Db(sql.Value, Connection) {
+pub fn db(config: Config) -> based.Db(plume.Value, Connection) {
   plume.config(config.db)
   |> plume.new
   |> Connection
-  |> db.driver(
+  |> based.driver(
     on_query: handle_query,
     on_execute: handle_execute,
     on_batch: handle_batch,
   )
-  |> db.new(sql.adapter())
+  |> based.new(sql.adapter())
 }
 
 /// Connects to the configured sqlite database and remains open until the callback
 /// completes.
 pub fn with_connection(
   config: Config,
-  next: fn(db.Db(sql.Value, Connection)) -> t,
-) -> Result(t, db.DbError) {
+  next: fn(based.Db(plume.Value, Connection)) -> t,
+) -> Result(t, based.BasedError) {
   plume.config(config.db)
   |> plume.with_connection(fn(conn) {
     Connection(conn:)
-    |> db.driver(
+    |> based.driver(
       on_query: handle_query,
       on_execute: handle_execute,
       on_batch: handle_batch,
     )
-    |> db.new(sql.adapter())
+    |> based.new(sql.adapter())
     |> next
   })
   |> result.map_error(to_db_error)
@@ -68,14 +64,14 @@ pub fn with_connection(
 
 /// Runs a callback inside a SQLite transaction.
 ///
-/// The callback receives a `db.Db` record scoped to the transaction.
+/// The callback receives a `based.Db` record scoped to the transaction.
 /// If the callback returns `Ok`, the transaction is committed.
 /// If it returns `Error` or crashes, the transaction is rolled back.
 pub fn transaction(
-  db: db.Db(sql.Value, Connection),
-  next: fn(db.Db(sql.Value, Connection)) -> Result(t, error),
-) -> Result(t, db.TransactionError(error)) {
-  db.transaction(db, tx_handler, next)
+  db: based.Db(plume.Value, Connection),
+  next: fn(based.Db(plume.Value, Connection)) -> Result(t, error),
+) -> Result(t, based.TransactionError(error)) {
+  based.transaction(db, tx_handler, next)
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +81,7 @@ pub fn transaction(
 fn tx_handler(
   conn: Connection,
   next: fn(Connection) -> Result(t, error),
-) -> Result(t, db.TransactionError(error)) {
+) -> Result(t, based.TransactionError(error)) {
   plume.transaction(conn.conn, fn(plume_conn) { Connection(plume_conn) |> next })
   |> result.map_error(to_tx_error)
 }
@@ -95,170 +91,65 @@ fn tx_handler(
 // ---------------------------------------------------------------------------
 
 fn handle_query(
-  query: sql.Query(sql.Value),
+  query: sql.Query(plume.Value),
   conn: Connection,
-) -> Result(db.Queried, db.DbError) {
-  let values = list.map(query.values, to_plume_value)
-
-  plume.query(query.sql, values, conn.conn)
+) -> Result(based.Queried, based.BasedError) {
+  plume.query(query.sql, query.values, conn.conn)
   |> result.map(to_db_queried)
   |> result.map_error(to_db_error)
 }
 
-fn handle_execute(sql: String, conn: Connection) -> Result(Int, db.DbError) {
+fn handle_execute(
+  sql: String,
+  conn: Connection,
+) -> Result(Int, based.BasedError) {
   plume.execute(sql, on: conn.conn)
   |> result.map_error(to_db_error)
 }
 
 fn handle_batch(
-  queries: List(sql.Query(sql.Value)),
+  queries: List(sql.Query(plume.Value)),
   conn: Connection,
-) -> Result(List(db.Queried), db.DbError) {
+) -> Result(List(based.Queried), based.BasedError) {
   use query <- list.try_map(queries)
 
-  let values = list.map(query.values, to_plume_value)
-
-  plume.query(query.sql, values, conn.conn)
+  plume.query(query.sql, query.values, conn.conn)
   |> result.map(to_db_queried)
   |> result.map_error(to_db_error)
 }
 
 // ---------------------------------------------------------------------------
-// Value conversion: based/sql.Value -> plume.Value
+// Queried conversion: plume.Queried -> based/based.Queried
 // ---------------------------------------------------------------------------
 
-fn to_plume_value(value: sql.Value) -> plume.Value {
-  case value {
-    sql.Null -> plume.Null
-    sql.Bool(b) -> plume.Bool(b)
-    sql.Int(i) -> plume.Int(i)
-    sql.Float(f) -> plume.Float(f)
-    sql.Text(s) -> plume.Text(s)
-    sql.Bytea(b) -> plume.Bytea(b)
-    sql.Date(d) -> plume.Date(d)
-    sql.Time(t) -> plume.Time(t)
-    sql.Datetime(d, t) -> plume.Datetime(d, t)
-    sql.Timestamp(ts) -> plume.Timestamp(ts)
-    sql.Uuid(u) -> plume.Bytea(uuid.to_bit_array(u))
-    sql.Timestamptz(ts, _offset) -> plume.Timestamp(ts)
-    sql.Interval(iv) -> plume.Text(interval.to_iso8601_string(iv))
-    sql.Array(vals) -> plume.Text(array_to_json(vals))
-  }
+fn to_db_queried(queried: plume.Queried) -> based.Queried {
+  based.Queried(
+    count: queried.count,
+    fields: queried.fields,
+    rows: queried.rows,
+  )
 }
 
 // ---------------------------------------------------------------------------
-// Array serialization (simple JSON)
+// Error conversion: plume.PlumeError -> based/based.BasedError
 // ---------------------------------------------------------------------------
 
-fn array_to_json(values: List(sql.Value)) -> String {
-  let items = list.map(values, value_to_json)
-  "[" <> string.join(items, ",") <> "]"
-}
-
-fn value_to_json(value: sql.Value) -> String {
-  case value {
-    sql.Null -> "null"
-    sql.Bool(True) -> "true"
-    sql.Bool(False) -> "false"
-    sql.Int(i) -> string.inspect(i)
-    sql.Float(f) -> string.inspect(f)
-    sql.Text(s) -> json_escape_string(s)
-    sql.Bytea(_) -> json_escape_string("<binary>")
-    sql.Uuid(u) -> json_escape_string(uuid.to_string(u))
-    sql.Date(d) -> json_escape_string(date_to_string(d))
-    sql.Time(t) -> json_escape_string(time_to_string(t))
-    sql.Datetime(d, t) ->
-      json_escape_string(date_to_string(d) <> " " <> time_to_string(t))
-    sql.Timestamp(ts) -> json_escape_string(string.inspect(ts))
-    sql.Timestamptz(ts, _) -> json_escape_string(string.inspect(ts))
-    sql.Interval(iv) -> json_escape_string(interval.to_iso8601_string(iv))
-    sql.Array(vals) -> array_to_json(vals)
-  }
-}
-
-fn json_escape_string(s: String) -> String {
-  "\""
-  <> s
-  |> string.replace("\\", "\\\\")
-  |> string.replace("\"", "\\\"")
-  |> string.replace("\n", "\\n")
-  |> string.replace("\r", "\\r")
-  |> string.replace("\t", "\\t")
-  <> "\""
-}
-
-// ---------------------------------------------------------------------------
-// Date/time formatting helpers (for JSON serialization of arrays)
-// ---------------------------------------------------------------------------
-
-fn date_to_string(date: calendar.Date) -> String {
-  pad_zero(date.year, 4)
-  <> "-"
-  <> pad_zero(month_to_int(date.month), 2)
-  <> "-"
-  <> pad_zero(date.day, 2)
-}
-
-fn time_to_string(time: calendar.TimeOfDay) -> String {
-  pad_zero(time.hours, 2)
-  <> ":"
-  <> pad_zero(time.minutes, 2)
-  <> ":"
-  <> pad_zero(time.seconds, 2)
-}
-
-fn pad_zero(value: Int, width: Int) -> String {
-  let s = string.inspect(value)
-  let pad = width - string.length(s)
-  case pad > 0 {
-    True -> string.repeat("0", pad) <> s
-    False -> s
-  }
-}
-
-fn month_to_int(month: calendar.Month) -> Int {
-  case month {
-    calendar.January -> 1
-    calendar.February -> 2
-    calendar.March -> 3
-    calendar.April -> 4
-    calendar.May -> 5
-    calendar.June -> 6
-    calendar.July -> 7
-    calendar.August -> 8
-    calendar.September -> 9
-    calendar.October -> 10
-    calendar.November -> 11
-    calendar.December -> 12
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Queried conversion: plume.Queried -> based/db.Queried
-// ---------------------------------------------------------------------------
-
-fn to_db_queried(queried: plume.Queried) -> db.Queried {
-  db.Queried(count: queried.count, fields: queried.fields, rows: queried.rows)
-}
-
-// ---------------------------------------------------------------------------
-// Error conversion: plume.PlumeError -> based/db.DbError
-// ---------------------------------------------------------------------------
-
-fn to_db_error(err: plume.PlumeError) -> db.DbError {
+fn to_db_error(err: plume.PlumeError) -> based.BasedError {
   case err {
-    plume.ConnectionFailed -> db.ConnectionError("connection failed")
-    plume.ConnectionUnavailable -> db.ConnectionError("connection unavailable")
+    plume.ConnectionFailed -> based.ConnectionError("connection failed")
+    plume.ConnectionUnavailable ->
+      based.ConnectionError("connection unavailable")
     plume.DbError(code:, message:, detail:, ..) ->
       classify_db_error(code, message, detail)
   }
+  |> based.DbError
 }
 
 fn classify_db_error(
   code: plume.Code,
   message: String,
   detail: String,
-) -> db.DbError {
+) -> based.DatabaseError {
   let name = code_to_name(code)
   let full_message = case detail {
     "" -> message
@@ -266,11 +157,12 @@ fn classify_db_error(
   }
 
   case is_constraint_error(code) {
-    True -> db.ConstraintError(code: name, name: name, message: full_message)
+    True -> based.ConstraintError(code: name, name: name, message: full_message)
     False ->
       case is_syntax_error(code) {
-        True -> db.SyntaxError(code: name, name: name, message: full_message)
-        False -> db.DatabaseError(code: name, name: name, message: full_message)
+        True -> based.SyntaxError(code: name, name: name, message: full_message)
+        False ->
+          based.DatabaseError(code: name, name: name, message: full_message)
       }
   }
 }
@@ -395,10 +287,12 @@ fn code_to_name(code: plume.Code) -> String {
 // Transaction error conversion
 // ---------------------------------------------------------------------------
 
-fn to_tx_error(err: plume.TransactionError(error)) -> db.TransactionError(error) {
+fn to_tx_error(
+  err: plume.TransactionError(error),
+) -> based.TransactionError(error) {
   case err {
-    plume.RollbackError(cause:) -> db.Rollback(cause:)
-    plume.NotInTransaction -> db.NotInTransaction
-    plume.TransactionError(message:) -> db.TransactionError(message:)
+    plume.RollbackError(cause:) -> based.Rollback(cause:)
+    plume.NotInTransaction -> based.NotInTransaction
+    plume.TransactionError(message:) -> based.TransactionError(message:)
   }
 }

@@ -6,10 +6,11 @@ licences = ["MIT"]
 repository = { type = "github", user = "stndrs", repo = "based_sqlite" }
 
 [dependencies]
-gleam_stdlib = ">= 0.44.0 and < 2.0.0"
-plume = { git = "https://github.com/stndrs/plume", ref = "main" }
-based = { git = "https://github.com/stndrs/based", ref = "main" }
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 gleam_time = ">= 1.7.0 and < 2.0.0"
+based = ">= 4.0.0 and < 5.0.0"
+plume = { git = "https://github.com/stndrs/plume", ref = "main" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
+youid = ">= 1.6.0 and < 2.0.0"
